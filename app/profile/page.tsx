@@ -1,4 +1,3 @@
-import { redirect } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 
 const { data: session } = await authClient.getSession();
@@ -20,7 +19,5 @@ export default function ProfilePage() {
         </div>
       </div>
     )
-  } else {
-    redirect("/login");
   }
 }
