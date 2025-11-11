@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { admin } from "better-auth/plugins"
 
-export async function GET(req: Request, { auth }: { auth: any }) {
+export async function GET(request: Request, { auth }: { auth?: any } = {}) {
   // ✅ Allow only admin users
   if (!admin(auth)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
