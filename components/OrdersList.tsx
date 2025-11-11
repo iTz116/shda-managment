@@ -17,30 +17,25 @@ const STATUS_OPTIONS = ["Pending", "Processing", "Completed", "Cancelled"]
 export function OrdersList({ initialOrders }: { initialOrders: Order[] }) {
   const [orders, setOrders] = useState(initialOrders)
 
-  // 🌐 Connect to WebSocket
-  useEffect(() => {
-    const ws = new WebSocket("ws://localhost:3001")
+  // // 🌐 Connect to WebSocket
+  // useEffect(() => {
+  //   const ws = new WebSocket("ws://localhost:3001");
 
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data)
+  //   ws.onopen = () => console.log("🟢 WS connected");
+  //   ws.onmessage = (event) => {
+  //     const data = JSON.parse(event.data);
+  //     console.log("Received:", data);
+  //     // Update your orders state here
+  //   };
 
-      if (data.type === "order_status_updated") {
-        setOrders((prev) =>
-          prev.map((o) => (o.id === data.order.id ? data.order : o))
-        )
-      }
+  //   ws.onerror = (err) => {
+  //     console.error("❌ WS error:", err);
+  //   };
 
-      if (data.type === "new_order") {
-        setOrders((prev) => [data.order, ...prev])
-      }
-    }
+  //   ws.onclose = () => console.log("🔴 WS disconnected");
 
-    ws.onopen = () => console.log("🟢 Connected to WS server")
-    ws.onclose = () => console.log("🔴 WS connection closed")
-    ws.onerror = (err) => console.error("❌ WS error:", err)
-
-    return () => ws.close()
-  }, [])
+  //   return () => ws.close();
+  // }, []);
 
   // Update status via API
   async function handleStatusChange(orderId: number, newStatus: string) {
