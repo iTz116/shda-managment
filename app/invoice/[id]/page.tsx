@@ -6,39 +6,41 @@ import { Button } from "@/components/ui/button"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 
-interface Invoice {
-  id: number
-  customer_name?: string
-  customer_phone?: string
-  customer_location?: string
-  invoice_number: string
+interface InvoiceItem {
+  name: string
+  quantity: number
+  price: number
   total: number
-  created_at: string
 }
 
-export default function InvoicePage() {
+interface Invoice {
+  id: number
+  order_id: number
+  invoice_number: string
+  total: number
+  notes?: string
+  created_at: string
+  customer_name: string
+  customer_phone: string
+  customer_location: string
+  items: InvoiceItem[]
+}
+
+export default function PublicInvoicePage() {
   const { id } = useParams()
   const [invoice, setInvoice] = useState<Invoice | null>(null)
 
   useEffect(() => {
     const fetchInvoice = async () => {
-      try {
-        const res = await fetch(`/api/invoices/${id}`)
-        if (!res.ok) throw new Error("Invoice not found")
-        const data = await res.json()
-        // ensure total is number
-        data.total = Number(data.total) || 0
-        setInvoice(data)
-      } catch (err) {
-        console.error(err)
-      }
+      const res = await fetch(`/api/invoices/${id}`)
+      const data: Invoice = await res.json()
+      setInvoice(data)
     }
     fetchInvoice()
   }, [id])
 
-  const handleDownloadPDF = () => {
-    if (!invoice) return
-
+  const downloadPDF = () => {
+    if (!invoice || !invoice.items) return
     const doc = new jsPDF()
     const accentColor = "#6C63FF"
     const textGray = "#555"
@@ -53,32 +55,26 @@ export default function InvoicePage() {
     doc.text(`Invoice #: ${invoice.invoice_number}`, 150, 20)
     doc.text(`Date: ${new Date(invoice.created_at).toLocaleDateString()}`, 150, 30)
 
-    // Company Info
-    doc.setTextColor(textGray)
-    doc.setFontSize(11)
-    doc.text("SHDA Store", 20, 55)
-    doc.text("Amman, Jordan", 20, 62)
-    doc.text("support@shda.com", 20, 69)
-
     // Customer Info
-    doc.setFontSize(13)
-    doc.setTextColor("#000")
-    doc.text("Bill To:", 140, 55)
-    doc.setFontSize(11)
     doc.setTextColor(textGray)
-    doc.text(invoice.customer_name || "N/A", 140, 62)
-    doc.text(invoice.customer_phone || "N/A", 140, 69)
-    doc.text(invoice.customer_location || "N/A", 140, 76)
+    doc.setFontSize(11)
+    doc.text("Bill To:", 20, 55)
+    doc.setTextColor("#000")
+    doc.text(invoice.customer_name, 20, 62)
+    doc.text(invoice.customer_phone, 20, 69)
+    doc.text(invoice.customer_location, 20, 76)
 
-    // Example Table (replace with real order items if you have)
-    const items = [
-      ["Product A", "2", "$25.00", "$50.00"],
-      ["Product B", "1", "$35.00", "$35.00"],
-    ]
+    // Table
+    const itemsTable = invoice.items.map((item: InvoiceItem) => [
+      item.name,
+      item.quantity.toString(),
+      `$${item.price.toFixed(2)}`,
+      `$${item.total.toFixed(2)}`,
+    ])
 
     autoTable(doc, {
       head: [["Item", "Qty", "Price", "Total"]],
-      body: items,
+      body: itemsTable,
       startY: 95,
       theme: "striped",
       headStyles: { fillColor: accentColor, textColor: "#fff", halign: "center" },
@@ -87,17 +83,17 @@ export default function InvoicePage() {
 
     // Summary
     const finalY = (doc as any).lastAutoTable.finalY + 10
-    doc.setFontSize(12)
-    doc.text("Total:", 150, finalY)
-    doc.text(`$${invoice.total.toFixed(2)}`, 180, finalY)
+    const subtotal = invoice.items.reduce((sum, i) => sum + i.total, 0)
+    const tax = subtotal * 0.1
+    const total = subtotal + tax
 
-    // Footer
-    doc.setDrawColor(accentColor)
-    doc.line(20, 280, 190, 280)
-    doc.setFontSize(10)
-    doc.setTextColor(textGray)
-    doc.text("Thank you for your business!", 20, 288)
-    doc.text("www.shda.com", 160, 288)
+    doc.setFontSize(12)
+    doc.setTextColor("#000")
+    doc.text(`Subtotal: $${subtotal.toFixed(2)}`, 150, finalY)
+    doc.text(`Tax (10%): $${tax.toFixed(2)}`, 150, finalY + 8)
+    doc.setFontSize(14)
+    doc.setTextColor(accentColor)
+    doc.text(`Total: $${total.toFixed(2)}`, 150, finalY + 18)
 
     doc.save(`Invoice-${invoice.invoice_number}.pdf`)
   }
@@ -111,15 +107,37 @@ export default function InvoicePage() {
       </h1>
 
       <div className="space-y-2">
-        <p><strong>Customer:</strong> {invoice.customer_name || "-"}</p>
-        <p><strong>Phone:</strong> {invoice.customer_phone || "-"}</p>
-        <p><strong>Location:</strong> {invoice.customer_location || "-"}</p>
-        <p><strong>Total:</strong> ${invoice.total.toFixed(2)}</p>
-        <p><strong>Date:</strong> {new Date(invoice.created_at).toLocaleString()}</p>
+        <p><strong>Customer:</strong> {invoice.customer_name}</p>
+        <p><strong>Phone:</strong> {invoice.customer_phone}</p>
+        <p><strong>Location:</strong> {invoice.customer_location}</p>
+        <p><strong>Subtotal:</strong> ${invoice.items.reduce((sum, i) => sum + i.total, 0).toFixed(2)}</p>
+        <p><strong>Tax (10%):</strong> ${(invoice.items.reduce((sum, i) => sum + i.total, 0) * 0.1).toFixed(2)}</p>
+        <p><strong>Total:</strong> ${(invoice.items.reduce((sum, i) => sum + i.total, 0) * 1.1).toFixed(2)}</p>
       </div>
 
-      <Button className="mt-6 w-full" onClick={handleDownloadPDF}>
-        Download Modern Invoice (PDF)
+      <table className="w-full mt-4 border border-gray-200">
+        <thead className="bg-gray-50">
+          <tr>
+            <th className="px-2 py-1 border">Item</th>
+            <th className="px-2 py-1 border">Qty</th>
+            <th className="px-2 py-1 border">Price</th>
+            <th className="px-2 py-1 border">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {invoice.items.map((item: InvoiceItem, idx: number) => (
+            <tr key={idx}>
+              <td className="px-2 py-1 border">{item.name}</td>
+              <td className="px-2 py-1 border">{item.quantity}</td>
+              <td className="px-2 py-1 border">${item.price.toFixed(2)}</td>
+              <td className="px-2 py-1 border">${item.total.toFixed(2)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <Button className="mt-6 w-full" onClick={downloadPDF}>
+        Download Invoice (PDF)
       </Button>
     </div>
   )

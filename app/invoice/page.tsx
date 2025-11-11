@@ -1,9 +1,10 @@
 "use client"
 
-import React, { useEffect, useState, useRef } from "react"
+import React, { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { authClient } from "@/lib/auth-client"
 import { jsPDF } from "jspdf"
+import autoTable from "jspdf-autotable"
 
 interface Invoice {
   id: number
@@ -12,22 +13,18 @@ interface Invoice {
   total: number
   notes?: string
   created_at: string
+  customer_name: string
+  customer_phone: string
+  customer_location: string
+  items?: { name: string; quantity: number; price: number; total: number }[]
 }
 
-export default function InvoicePage() {
+export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
-  const [showForm, setShowForm] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-
-  const orderIdRef = useRef<HTMLInputElement>(null)
-  const totalRef = useRef<HTMLInputElement>(null)
-  const notesRef = useRef<HTMLInputElement>(null)
-
   const router = useRouter()
   const { data: session, isPending } = authClient.useSession()
 
-  // Fetch invoices
   const fetchInvoices = async () => {
     setLoading(true)
     try {
@@ -42,136 +39,95 @@ export default function InvoicePage() {
     }
   }
 
-  // Load invoices on mount
   useEffect(() => {
-    fetchInvoices()
-  }, [])
-
-  // Create new invoice
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!orderIdRef.current || !totalRef.current) return
-
-    setSubmitting(true)
-    try {
-      const res = await fetch("/api/invoices", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          order_id: parseInt(orderIdRef.current.value),
-          total: parseFloat(totalRef.current.value),
-          notes: notesRef.current?.value || null,
-        }),
-      })
-      if (!res.ok) throw new Error("Failed to create invoice")
-
-      orderIdRef.current.value = ""
-      totalRef.current.value = ""
-      if (notesRef.current) notesRef.current.value = ""
-      setShowForm(false)
-      fetchInvoices()
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setSubmitting(false)
+    if (!isPending && (!session?.user || session.user.role !== "admin")) {
+      router.push("/login")
     }
-  }
+    fetchInvoices()
+  }, [isPending, session, router])
 
-  // Download PDF
   const downloadPDF = (invoice: Invoice) => {
+    if (!invoice.items) return
     const doc = new jsPDF()
-    doc.setFontSize(16)
-    doc.text(`Invoice: ${invoice.invoice_number}`, 20, 20)
+    const accentColor = "#6C63FF"
+    const textGray = "#555"
+
+    // Header
+    doc.setFillColor(accentColor)
+    doc.rect(0, 0, 210, 40, "F")
+    doc.setFontSize(22)
+    doc.setTextColor("#fff")
+    doc.text("INVOICE", 20, 25)
     doc.setFontSize(12)
-    doc.text(`Order ID: ${invoice.order_id}`, 20, 40)
-    doc.text(`Total: $${Number(invoice.total).toFixed(2)}`, 20, 50)
-    doc.text(`Notes: ${invoice.notes || "-"}`, 20, 60)
-    doc.text(`Date: ${new Date(invoice.created_at).toLocaleString()}`, 20, 70)
-    doc.save(`${invoice.invoice_number}.pdf`)
+    doc.text(`Invoice #: ${invoice.invoice_number}`, 150, 20)
+    doc.text(`Date: ${new Date(invoice.created_at).toLocaleDateString()}`, 150, 30)
+
+    // Customer Info
+    doc.setTextColor(textGray)
+    doc.setFontSize(11)
+    doc.text("Bill To:", 20, 55)
+    doc.setTextColor("#000")
+    doc.text(invoice.customer_name, 20, 62)
+    doc.text(invoice.customer_phone, 20, 69)
+    doc.text(invoice.customer_location, 20, 76)
+
+    // Table
+    const itemsTable = invoice.items.map((item) => [
+      item.name,
+      item.quantity.toString(),
+      `$${item.price.toFixed(2)}`,
+      `$${item.total.toFixed(2)}`,
+    ])
+
+    autoTable(doc, {
+      head: [["Item", "Qty", "Price", "Total"]],
+      body: itemsTable,
+      startY: 95,
+      theme: "striped",
+      headStyles: { fillColor: accentColor, textColor: "#fff", halign: "center" },
+      styles: { textColor: "#000", halign: "center" },
+    })
+
+    // Summary
+    const finalY = (doc as any).lastAutoTable.finalY + 10
+    const subtotal = invoice.items.reduce((sum, i) => sum + i.total, 0)
+    const tax = subtotal * 0.1
+    const total = subtotal + tax
+
+    doc.setFontSize(12)
+    doc.setTextColor("#000")
+    doc.text(`Subtotal: $${subtotal.toFixed(2)}`, 150, finalY)
+    doc.text(`Tax (10%): $${tax.toFixed(2)}`, 150, finalY + 8)
+    doc.setFontSize(14)
+    doc.setTextColor(accentColor)
+    doc.text(`Total: $${total.toFixed(2)}`, 150, finalY + 18)
+
+    // Footer
+    doc.setDrawColor(accentColor)
+    doc.line(20, 280, 190, 280)
+    doc.setFontSize(10)
+    doc.setTextColor(textGray)
+    doc.text("Thank you for your business!", 20, 288)
+    doc.text("www.shda.com", 160, 288)
+
+    doc.save(`Invoice-${invoice.invoice_number}.pdf`)
   }
 
-  // Show loading while session is pending
-  if (isPending) return <div className="p-6">Loading session...</div>
-
-  // Admin-only protection
-  if (!session?.user || session.user.role !== "admin") {
-    return (
-      <div className="p-6 text-red-600 font-bold">
-        Access Denied. Admins only.
-      </div>
-    )
-  }
+  if (!session?.user || session.user.role !== "admin") return null
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header + Toggle Form */}
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Invoices</h1>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-        >
-          {showForm ? "Cancel" : "+ New Invoice"}
-        </button>
-      </div>
+      <h1 className="text-2xl font-bold">Invoices</h1>
 
-      {/* Invoice Creation Form */}
-      {showForm && (
-        <form
-          onSubmit={handleSubmit}
-          className="p-4 border rounded shadow space-y-4"
-        >
-          <div>
-            <label className="block font-medium">Order ID</label>
-            <input
-              type="number"
-              ref={orderIdRef}
-              required
-              className="w-full border px-2 py-1 rounded"
-            />
-          </div>
-
-          <div>
-            <label className="block font-medium">Total</label>
-            <input
-              type="number"
-              step="0.01"
-              ref={totalRef}
-              required
-              className="w-full border px-2 py-1 rounded"
-            />
-          </div>
-
-          <div>
-            <label className="block font-medium">Notes</label>
-            <input
-              type="text"
-              ref={notesRef}
-              className="w-full border px-2 py-1 rounded"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={submitting}
-            className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
-          >
-            {submitting ? "Creating..." : "Create Invoice"}
-          </button>
-        </form>
-      )}
-
-      {/* Invoices Table */}
       <div className="overflow-x-auto rounded-lg border border-gray-200 shadow">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
               <th>ID</th>
               <th>Invoice #</th>
-              <th>Order ID</th>
+              <th>Customer</th>
               <th>Total</th>
-              <th>Notes</th>
-              <th>Created At</th>
+              <th>Date</th>
               <th>PDF</th>
             </tr>
           </thead>
@@ -179,23 +135,15 @@ export default function InvoicePage() {
             {loading
               ? Array.from({ length: 5 }).map((_, idx) => (
                   <tr key={idx}>
-                    {Array.from({ length: 7 }).map((_, colIdx) => (
-                      <td
-                        key={colIdx}
-                        className="px-4 py-6 animate-pulse bg-gray-100"
-                      >
-                        &nbsp;
-                      </td>
+                    {Array.from({ length: 6 }).map((_, colIdx) => (
+                      <td key={colIdx} className="px-4 py-6 animate-pulse bg-gray-100">&nbsp;</td>
                     ))}
                   </tr>
                 ))
               : invoices.length === 0
               ? (
                 <tr>
-                  <td
-                    colSpan={7}
-                    className="px-4 py-6 text-center text-gray-500"
-                  >
+                  <td colSpan={6} className="px-4 py-6 text-center text-gray-500">
                     No invoices found.
                   </td>
                 </tr>
@@ -204,12 +152,9 @@ export default function InvoicePage() {
                   <tr key={inv.id} className="hover:bg-gray-50">
                     <td className="px-4 py-2">{inv.id}</td>
                     <td className="px-4 py-2">{inv.invoice_number}</td>
-                    <td className="px-4 py-2">{inv.order_id}</td>
+                    <td className="px-4 py-2">{inv.customer_name}</td>
                     <td className="px-4 py-2">${Number(inv.total).toFixed(2)}</td>
-                    <td className="px-4 py-2">{inv.notes || "-"}</td>
-                    <td className="px-4 py-2">
-                      {new Date(inv.created_at).toLocaleString()}
-                    </td>
+                    <td className="px-4 py-2">{new Date(inv.created_at).toLocaleString()}</td>
                     <td className="px-4 py-2">
                       <button
                         onClick={() => downloadPDF(inv)}
